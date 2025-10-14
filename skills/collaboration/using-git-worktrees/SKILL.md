@@ -17,83 +17,69 @@ Git worktrees create isolated workspaces sharing the same repository, allowing w
 
 ## Directory Selection Process
 
-Follow this priority order:
+**Default location:** `../<dir-name>.worktrees/`
 
-### 1. Check Existing Directories
+Where `<dir-name>` is the project directory's name (e.g., `d/radial` → `d/radial.worktrees/`)
 
-```bash
-# Check in priority order
-ls -d .worktrees 2>/dev/null     # Preferred (hidden)
-ls -d worktrees 2>/dev/null      # Alternative
-```
-
-**If found:** Use that directory. If both exist, `.worktrees` wins.
-
-### 2. Check CLAUDE.md
+### 1. Detect If Already In Worktree
 
 ```bash
-grep -i "worktree.*director" CLAUDE.md 2>/dev/null
+# Check if current directory matches *.worktrees pattern
+if [[ "$PWD" == *".worktrees/"* ]] || [[ "$(basename "$PWD")" == *.worktrees ]]; then
+  # Already in worktree - use current directory as worktree_dir
+  if [[ "$PWD" == *".worktrees/"* ]]; then
+    # In a branch subdirectory like d/radial.worktrees/feature-x
+    worktree_dir=$(dirname "$PWD")
+  else
+    # In the .worktrees directory itself
+    worktree_dir="$PWD"
+  fi
+else
+  # In main project - calculate worktree_dir
+  project=$(basename "$PWD")
+  worktree_dir="../${project}.worktrees"
+fi
 ```
 
-**If preference specified:** Use it without asking.
+### 2. Summary
 
-### 3. Ask User
+**If in main project:** Use `../<project-name>.worktrees/`
 
-If no directory exists and no CLAUDE.md preference:
-
-```
-No worktree directory found. Where should I create worktrees?
-
-1. .worktrees/ (project-local, hidden)
-2. ~/.clank-worktrees/<project-name>/ (global location)
-
-Which would you prefer?
-```
+**If already in worktree:** Reuse same worktree directory for new branch
 
 ## Safety Verification
 
-### For Project-Local Directories (.worktrees or worktrees)
+**Not required** - worktree directory is outside project (sibling to project root).
 
-**MUST verify .gitignore before creating worktree:**
-
-```bash
-# Check if directory pattern in .gitignore
-grep -q "^\.worktrees/$" .gitignore || grep -q "^worktrees/$" .gitignore
-```
-
-**If NOT in .gitignore:**
-
-Per Jesse's rule "Fix broken things immediately":
-1. Add appropriate line to .gitignore
-2. Commit the change
-3. Proceed with worktree creation
-
-**Why critical:** Prevents accidentally committing worktree contents to repository.
-
-### For Global Directory (~/.clank-worktrees)
-
-No .gitignore verification needed - outside project entirely.
+No .gitignore verification needed.
 
 ## Creation Steps
 
-### 1. Detect Project Name
+### 1. Detect Worktree Directory Path
 
 ```bash
-project=$(basename "$(git rev-parse --show-toplevel)")
+# Check if current directory matches *.worktrees pattern
+if [[ "$PWD" == *".worktrees/"* ]] || [[ "$(basename "$PWD")" == *.worktrees ]]; then
+  # Already in worktree - use current directory as worktree_dir
+  if [[ "$PWD" == *".worktrees/"* ]]; then
+    # In a branch subdirectory like d/radial.worktrees/feature-x
+    worktree_dir=$(dirname "$PWD")
+  else
+    # In the .worktrees directory itself
+    worktree_dir="$PWD"
+  fi
+else
+  # In main project - calculate worktree_dir
+  project=$(basename "$PWD")
+  worktree_dir="../${project}.worktrees"
+fi
 ```
 
 ### 2. Create Worktree
 
 ```bash
-# Determine full path
-case $LOCATION in
-  .worktrees|worktrees)
-    path="$LOCATION/$BRANCH_NAME"
-    ;;
-  ~/.clank-worktrees/*)
-    path="~/.clank-worktrees/$project/$BRANCH_NAME"
-    ;;
-esac
+# Determine full path for this branch
+path="${worktree_dir}/${BRANCH_NAME}"
 
 # Create worktree with new branch
 git worktree add "$path" -b "$BRANCH_NAME"
@@ -147,23 +133,17 @@ Ready to implement <feature-name>
 
 | Situation | Action |
 |-----------|--------|
-| `.worktrees/` exists | Use it (verify .gitignore) |
-| `worktrees/` exists | Use it (verify .gitignore) |
-| Both exist | Use `.worktrees/` |
-| Neither exists | Check CLAUDE.md → Ask user |
-| Directory not in .gitignore | Add it immediately + commit |
+| In main project `d/radial` | Use `d/radial.worktrees/${branch}` |
+| In worktree `d/radial.worktrees/feature-x` | Use `d/radial.worktrees/${branch}` |
+| In worktree dir `d/radial.worktrees` | Use `d/radial.worktrees/${branch}` |
 | Tests fail during baseline | Report failures + ask |
 | No package.json/Cargo.toml | Skip dependency install |
 
 ## Common Mistakes
 
-**Skipping .gitignore verification**
-- **Problem:** Worktree contents get tracked, pollute git status
-- **Fix:** Always grep .gitignore before creating project-local worktree
-
-**Assuming directory location**
-- **Problem:** Creates inconsistency, violates project conventions
-- **Fix:** Follow priority: existing > CLAUDE.md > ask
+**Not detecting worktree context**
+- **Problem:** Creates nested or misplaced worktree directories
+- **Fix:** Always check if PWD contains `.worktrees` pattern first
 
 **Proceeding with failing tests**
 - **Problem:** Can't distinguish new bugs from pre-existing issues
@@ -173,34 +153,51 @@ Ready to implement <feature-name>
 - **Problem:** Breaks on projects using different tools
 - **Fix:** Auto-detect from project files (package.json, etc.)
 
-## Example Workflow
+## Example Workflows
+
+### From Main Project
 
 ```
 You: I'm using the Using Git Worktrees skill to set up an isolated workspace.
 
-[Check .worktrees/ - exists]
-[Verify .gitignore - contains .worktrees/]
-[Create worktree: git worktree add .worktrees/auth -b feature/auth]
+[Detect: in main project d/radial]
+[Calculate worktree_dir: d/radial.worktrees]
+[Create worktree: git worktree add ../radial.worktrees/auth -b feature/auth]
 [Run npm install]
 [Run npm test - 47 passing]
 
-Worktree ready at /Users/jesse/myproject/.worktrees/auth
+Worktree ready at /Users/kristo/d/radial.worktrees/auth
 Tests passing (47 tests, 0 failures)
 Ready to implement auth feature
+```
+
+### From Existing Worktree
+
+```
+You: I'm using the Using Git Worktrees skill to set up an isolated workspace.
+
+[Detect: already in worktree d/radial.worktrees/feature-x]
+[Use same worktree_dir: d/radial.worktrees]
+[Create worktree: git worktree add ../radial.worktrees/bugfix -b bugfix/auth]
+[Run npm install]
+[Run npm test - 47 passing]
+
+Worktree ready at /Users/kristo/d/radial.worktrees/bugfix
+Tests passing (47 tests, 0 failures)
+Ready to implement bugfix
 ```
 
 ## Red Flags
 
 **Never:**
-- Create worktree without .gitignore verification (project-local)
+- Skip worktree context detection (check for `.worktrees` in PWD)
 - Skip baseline test verification
 - Proceed with failing tests without asking
-- Assume directory location when ambiguous
-- Skip CLAUDE.md check
+- Create worktrees inside other worktrees
 
 **Always:**
-- Follow directory priority: existing > CLAUDE.md > ask
-- Verify .gitignore for project-local
+- Detect if already in worktree directory first
+- Use `../${project}.worktrees/` pattern consistently
 - Auto-detect and run project setup
 - Verify clean test baseline
 
