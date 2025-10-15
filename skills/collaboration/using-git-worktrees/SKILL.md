@@ -78,15 +78,49 @@ fi
 ### 2. Create Worktree
 
 ```bash
+# Capture current location before creating worktree
+WORKTREE_CREATED_FROM="$PWD"
+
+# Get base repository path (the main repo, not a worktree)
+BASE_REPO_PATH=$(git rev-parse --show-toplevel)
+
+# Get current branch name as base branch
+BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
 # Determine full path for this branch
-path="${worktree_dir}/${BRANCH_NAME}"
+WORKTREE_DIR="${worktree_dir}/${BRANCH_NAME}"
+WORKTREE_NAME="$BRANCH_NAME"
 
 # Create worktree with new branch
-git worktree add "$path" -b "$BRANCH_NAME"
-cd "$path"
+git worktree add "$WORKTREE_DIR" -b "$BRANCH_NAME"
+cd "$WORKTREE_DIR"
 ```
 
-### 3. Run Project Setup
+### 3. Run Custom Setup Script (if exists)
+
+Check for project-specific worktree setup script:
+
+```bash
+# Check if custom setup script exists in base repo
+if [ -f "${BASE_REPO_PATH}/scripts/worktree-setup.ts" ]; then
+  # Run with bun, passing environment variables
+  WORKTREE_DIR="$WORKTREE_DIR" \
+  WORKTREE_NAME="$WORKTREE_NAME" \
+  BASE_BRANCH="$BASE_BRANCH" \
+  BASE_REPO_PATH="$BASE_REPO_PATH" \
+  WORKTREE_CREATED_FROM="$WORKTREE_CREATED_FROM" \
+  bun "${BASE_REPO_PATH}/scripts/setup-worktree.ts"
+fi
+```
+
+**Available environment variables for script:**
+- `WORKTREE_DIR` - Absolute path to new worktree
+- `WORKTREE_NAME` - Branch name / worktree name
+- `BASE_BRANCH` - Branch the worktree was created from
+- `BASE_REPO_PATH` - Absolute path to main repository
+- `WORKTREE_CREATED_FROM` - Directory where creation was initiated
+
+### 4. Run Project Setup
 
 Auto-detect and run appropriate setup:
 
@@ -105,7 +139,7 @@ if [ -f pyproject.toml ]; then poetry install; fi
 if [ -f go.mod ]; then go mod download; fi
 ```
 
-### 4. Verify Clean Baseline
+### 5. Verify Clean Baseline
 
 Run tests to ensure worktree starts clean:
 
@@ -121,7 +155,7 @@ go test ./...
 
 **If tests pass:** Report ready.
 
-### 5. Report Location
+### 6. Report Location
 
 ```
 Worktree ready at <full-path>
@@ -136,6 +170,7 @@ Ready to implement <feature-name>
 | In main project `d/radial` | Use `d/radial.worktrees/${branch}` |
 | In worktree `d/radial.worktrees/feature-x` | Use `d/radial.worktrees/${branch}` |
 | In worktree dir `d/radial.worktrees` | Use `d/radial.worktrees/${branch}` |
+| Custom setup script exists | Run `scripts/worktree-setup.ts` with env vars |
 | Tests fail during baseline | Report failures + ask |
 | No package.json/Cargo.toml | Skip dependency install |
 
@@ -163,6 +198,7 @@ You: I'm using the Using Git Worktrees skill to set up an isolated workspace.
 [Detect: in main project d/radial]
 [Calculate worktree_dir: d/radial.worktrees]
 [Create worktree: git worktree add ../radial.worktrees/auth -b feature/auth]
+[Run scripts/worktree-setup.ts with environment variables]
 [Run npm install]
 [Run npm test - 47 passing]
 
@@ -179,6 +215,7 @@ You: I'm using the Using Git Worktrees skill to set up an isolated workspace.
 [Detect: already in worktree d/radial.worktrees/feature-x]
 [Use same worktree_dir: d/radial.worktrees]
 [Create worktree: git worktree add ../radial.worktrees/bugfix -b bugfix/auth]
+[Run scripts/worktree-setup.ts with environment variables]
 [Run npm install]
 [Run npm test - 47 passing]
 
